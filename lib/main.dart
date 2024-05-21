@@ -1,10 +1,13 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:musicdownloaders/screens/app.dart';
+import 'package:musicdownloaders/splashScreen.dart';
 
 void main() {
-  runApp(const MaterialApp(
-      title: 'Spotify Clone',
-      debugShowCheckedModeBanner: false,
-      home: MyApp()));
+  WidgetsFlutterBinding.ensureInitialized();
+
+  runApp(MaterialApp(
+    title: 'Spotify Clone',
+    debugShowCheckedModeBanner: false,
+    home: SplashScreen(),
+  ));
 }

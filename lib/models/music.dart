@@ -1,7 +1,8 @@
 class Music {
-  String name;
-  String image;
-  String desc;
-  String audioURL;
+  final String name;
+  final String image;
+  final String desc;
+  final String audioURL;
+
   Music(this.name, this.image, this.desc, this.audioURL);
 }
