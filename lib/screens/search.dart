@@ -9,10 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path/path.dart'; // Add this import
-import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-
-
 
 class Search extends StatefulWidget {
   const Search({Key? key}) : super(key: key);
@@ -30,6 +27,18 @@ class _SearchState extends State<Search> {
   String? _currentStreamUrl;
   double _downloadProgress = 0.0;
   bool _downloading = false;
+  late FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin;
+
+  @override
+  void initState() {
+    super.initState();
+    flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+    var initializationSettingsAndroid = AndroidInitializationSettings('app_icon');
+    var initializationSettingsDarwin = DarwinInitializationSettings();
+    var initializationSettings = InitializationSettings(
+        android: initializationSettingsAndroid, iOS: initializationSettingsDarwin);
+    flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  }
 
   Future<void> _searchMusic(String query) async {
     setState(() {
@@ -71,46 +80,53 @@ class _SearchState extends State<Search> {
     }
   }
 
-  Future<void> _downloadFile(String videoUrl, String fileName, BuildContext context) async {
+  Future<void> _downloadFile(String videoUrl, String fileName, BuildContext context, int index) async {
     setState(() {
+      _videoResult[index]['isDownloading'] = true;
       _downloading = true;
       _downloadProgress = 0.0;
     });
 
-    final appDocDirectory = await getAppDocDirectory();
-    final finalVideoPath = join(
-      appDocDirectory.path,
-      'Video-${DateTime.now().millisecondsSinceEpoch}.mp4',
-    );
-
     final storageStatus = await Permission.storage.request();
-    if (!storageStatus.isGranted) {
-      print('Permission denied');
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: Text('Permission required'),
-            content: Text('This app needs storage permission to download files.'),
-            actions: <Widget>[
-              TextButton(
-                child: Text('OK'),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  openAppSettings();
-                },
-              ),
-            ],
-          );
-        },
-      );
-      return;
+    // if (!storageStatus.isGranted) {
+    //   print('Permission denied');
+    //   showDialog(
+    //     context: context,
+    //     builder: (BuildContext context) {
+    //       return AlertDialog(
+    //         title: Text('Permission required'),
+    //         content: Text('This app needs storage permission to download files.'),
+    //         actions: <Widget>[
+    //           TextButton(
+    //             child: Text('OK'),
+    //             onPressed: () {
+    //               Navigator.of(context).pop();
+    //               openAppSettings();
+    //             },
+    //           ),
+    //         ],
+    //       );
+    //     },
+    //   );
+    //   setState(() {
+    //     _videoResult[index]['isDownloading'] = false;
+    //     _downloading = false;
+    //   });
+    //   return;
+    // }
+
+    final directory = await getExternalStorageDirectory();
+    final downloadDirectory = Directory('/storage/emulated/0/Download');
+    if (!(await downloadDirectory.exists())) {
+      await downloadDirectory.create(recursive: true);
     }
+
+    final finalVideoPath = join(downloadDirectory.path, '$fileName.mp3');
 
     try {
       final url = 'https://youtube-mp3-downloader2.p.rapidapi.com/ytmp3/ytmp3/';
       final headers = {
-        'X-RapidAPI-Key': '664a4529dcmshb4d445b999cfe83p1a7680jsna3e6433efbef',
+        'X-RapidAPI-Key': 'aa24b6fb09msha2e0d754d3bfb53p1d02ccjsneb10ebabd44e',
         'X-RapidAPI-Host': 'youtube-mp3-downloader2.p.rapidapi.com'
       };
       final params = {'url': videoUrl};
@@ -126,12 +142,10 @@ class _SearchState extends State<Search> {
         }
 
         Dio dio = Dio();
-        final dir = await getExternalStorageDirectory();
-        final filePath = '${dir!.path}/${fileName ?? 'defaultFileName'}.mp3';
 
         await dio.download(
           downloadUrl,
-          filePath,
+          finalVideoPath,
           onReceiveProgress: (received, total) {
             setState(() {
               _downloadProgress = received / total;
@@ -139,7 +153,8 @@ class _SearchState extends State<Search> {
           },
         );
 
-        print('File downloaded to: $filePath');
+        print('File downloaded to: $finalVideoPath');
+        _showNotification(fileName);
       } else {
         throw Exception('Error: ${response.reasonPhrase}');
       }
@@ -163,8 +178,64 @@ class _SearchState extends State<Search> {
       );
     } finally {
       setState(() {
+        _videoResult[index]['isDownloading'] = false;
         _downloading = false;
       });
+    }
+  }
+
+  Future<void> _showNotification(String fileName) async {
+    var androidPlatformChannelSpecifics = AndroidNotificationDetails(
+        'download_channel',
+        'Downloads',
+        channelDescription: 'Channel for download notifications',
+        importance: Importance.max,
+        priority: Priority.high,
+        showWhen: false
+    );
+    var darwinPlatformChannelSpecifics = DarwinNotificationDetails();
+    var platformChannelSpecifics = NotificationDetails(
+        android: androidPlatformChannelSpecifics,
+        iOS: darwinPlatformChannelSpecifics
+    );
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Download Complete',
+      '$fileName has been downloaded successfully',
+      platformChannelSpecifics,
+      payload: 'Download complete',
+    );
+  }
+
+
+  void _initiateDownload(String videoId, String title, BuildContext context, int index) async {
+    final storageStatus = await Permission.storage.status;
+
+    if (!storageStatus.isGranted) {
+      _downloadFile(videoId, title, context, index);
+    } else {
+      final result = await Permission.storage.request();
+      if (result.isGranted) {
+        _downloadFile(videoId, title, context, index);
+      } else {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text('Permission Denied'),
+              content: Text('Storage permission is required to download files. Please enable it from settings.'),
+              actions: <Widget>[
+                TextButton(
+                  child: Text('OK'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
     }
   }
 
@@ -333,11 +404,13 @@ class _SearchState extends State<Search> {
                             IconButton(
                               icon: Icon(
                                 Icons.download,
-                                color: Colors.white,
+                                color: _downloading ? Colors.grey : Colors.white,
                               ),
-                              onPressed: () {
+                              onPressed: _downloading
+                                  ? null
+                                  : () {
                                 if (videoId != null) {
-                                  _downloadFile(videoId, title, context);
+                                  _initiateDownload(videoId, title, context, index);
                                 } else {
                                   print('Error: videoId is null');
                                 }
@@ -377,33 +450,56 @@ class _SearchState extends State<Search> {
     return Container(
       color: Colors.black,
       padding: EdgeInsets.all(16.0),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            icon: Icon(
-              _isPlaying ? Icons.pause : Icons.play_arrow,
-              color: Colors.white,
-            ),
-            onPressed: () {
-              if (_isPlaying) {
-                _audioPlayer.pause();
-              } else {
-                // Resume playing
-                _audioPlayer.resume();
-              }
-              setState(() {
-                _isPlaying = !_isPlaying;
-              });
-            },
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  _isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: Colors.white,
+                ),
+                onPressed: () {
+                  if (_isPlaying) {
+                    _audioPlayer.pause();
+                  } else {
+                    // Resume playing
+                    _audioPlayer.resume();
+                  }
+                  setState(() {
+                    _isPlaying = !_isPlaying;
+                  });
+                },
+              ),
+              SizedBox(width: 8.0),
+              Expanded(
+                child: Text(
+                  _currentStreamUrl ?? 'No song playing',
+                  style: TextStyle(color: Colors.white),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          SizedBox(width: 8.0),
-          Expanded(
-            child: Text(
-              _currentStreamUrl ?? 'No song playing',
-              style: TextStyle(color: Colors.white),
-              overflow: TextOverflow.ellipsis,
+          if (_downloading)
+            Padding(
+              padding: const EdgeInsets.only(top: 16.0),
+              child: Column(
+                children: [
+                  LinearProgressIndicator(
+                    value: _downloadProgress,
+                    backgroundColor: Colors.grey,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+                  ),
+                  SizedBox(height: 8.0),
+                  Text(
+                    'Downloading: ${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

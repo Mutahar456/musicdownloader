@@ -5,7 +5,7 @@ import 'package:musicdownloaders/screens/app.dart';
 import 'package:musicdownloaders/screens/home.dart';
 import 'package:musicdownloaders/screens/search.dart';
 import 'package:musicdownloaders/screens/yourlibrary.dart';
-
+import 'package:permission_handler/permission_handler.dart';
 class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
 
@@ -19,6 +19,7 @@ class _MyAppState extends State<MyApp> {
   int currentTabIndex = 0;
   bool isPlaying = false;
   Music? music;
+
 
   Widget miniPlayer(Music? music, {bool stop = false}) {
     this.music = music;
@@ -67,8 +68,15 @@ class _MyAppState extends State<MyApp> {
   initState() {
     super.initState();
     Tabs = [Home(miniPlayer), Search(), YourLibrary()];
+    _requestStoragePermission();
   }
 
+  Future<void> _requestStoragePermission() async {
+    final storageStatus = await Permission.storage.request();
+    if (!storageStatus.isGranted) {
+      print("premission denied");
+    }
+  }
   // UI Design Code Goes inside Build
   @override
   Widget build(BuildContext context) {
