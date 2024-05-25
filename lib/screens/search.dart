@@ -28,6 +28,7 @@ class _SearchState extends State<Search> {
   double _downloadProgress = 0.0;
   bool _downloading = false;
   late FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin;
+  CancelToken? _cancelToken;
 
   @override
   void initState() {
@@ -85,35 +86,36 @@ class _SearchState extends State<Search> {
       _videoResult[index]['isDownloading'] = true;
       _downloading = true;
       _downloadProgress = 0.0;
+      _cancelToken = CancelToken();
     });
 
     final storageStatus = await Permission.storage.request();
-    // if (!storageStatus.isGranted) {
-    //   print('Permission denied');
-    //   showDialog(
-    //     context: context,
-    //     builder: (BuildContext context) {
-    //       return AlertDialog(
-    //         title: Text('Permission required'),
-    //         content: Text('This app needs storage permission to download files.'),
-    //         actions: <Widget>[
-    //           TextButton(
-    //             child: Text('OK'),
-    //             onPressed: () {
-    //               Navigator.of(context).pop();
-    //               openAppSettings();
-    //             },
-    //           ),
-    //         ],
-    //       );
-    //     },
-    //   );
-    //   setState(() {
-    //     _videoResult[index]['isDownloading'] = false;
-    //     _downloading = false;
-    //   });
-    //   return;
-    // }
+    if (!storageStatus.isGranted) {
+      print('Permission denied');
+      showDialog(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text('Permission required'),
+            content: Text('This app needs storage permission to download files.'),
+            actions: <Widget>[
+              TextButton(
+                child: Text('OK'),
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  openAppSettings();
+                },
+              ),
+            ],
+          );
+        },
+      );
+      setState(() {
+        _videoResult[index]['isDownloading'] = false;
+        _downloading = false;
+      });
+      return;
+    }
 
     final directory = await getExternalStorageDirectory();
     final downloadDirectory = Directory('/storage/emulated/0/Download');
@@ -136,6 +138,7 @@ class _SearchState extends State<Search> {
       if (response.statusCode == 200) {
         final jsonResponse = json.decode(response.body);
         final downloadUrl = jsonResponse['dlink'];
+        print(downloadUrl);
 
         if (downloadUrl == null) {
           throw Exception('Download URL is null');
@@ -151,6 +154,7 @@ class _SearchState extends State<Search> {
               _downloadProgress = received / total;
             });
           },
+          cancelToken: _cancelToken, // Use cancel token for download cancellation
         );
 
         print('File downloaded to: $finalVideoPath');
@@ -159,27 +163,32 @@ class _SearchState extends State<Search> {
         throw Exception('Error: ${response.reasonPhrase}');
       }
     } catch (e) {
-      showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: Text('Download Error'),
-            content: Text(e.toString()),
-            actions: <Widget>[
-              TextButton(
-                child: Text('OK'),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
-          );
-        },
-      );
+      if (e is DioException && CancelToken.isCancel(e)) {
+        print('Download canceled');
+      } else {
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: Text('Download Error'),
+              content: Text(e.toString()),
+              actions: <Widget>[
+                TextButton(
+                  child: Text('OK'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      }
     } finally {
       setState(() {
         _videoResult[index]['isDownloading'] = false;
         _downloading = false;
+        _cancelToken = null;
       });
     }
   }
@@ -207,11 +216,14 @@ class _SearchState extends State<Search> {
     );
   }
 
+  void _cancelDownload() {
+    _cancelToken?.cancel();
+  }
 
   void _initiateDownload(String videoId, String title, BuildContext context, int index) async {
     final storageStatus = await Permission.storage.status;
 
-    if (!storageStatus.isGranted) {
+    if (storageStatus.isGranted) {
       _downloadFile(videoId, title, context, index);
     } else {
       final result = await Permission.storage.request();
@@ -401,7 +413,15 @@ class _SearchState extends State<Search> {
                                 }
                               },
                             ),
-                            IconButton(
+                            _videoResult[index]['isDownloading'] == true
+                                ? IconButton(
+                              icon: Icon(
+                                Icons.cancel,
+                                color: Colors.red,
+                              ),
+                              onPressed: _cancelDownload,
+                            )
+                                : IconButton(
                               icon: Icon(
                                 Icons.download,
                                 color: _downloading ? Colors.grey : Colors.white,
@@ -496,6 +516,13 @@ class _SearchState extends State<Search> {
                   Text(
                     'Downloading: ${(_downloadProgress * 100).toStringAsFixed(1)}%',
                     style: TextStyle(color: Colors.white),
+                  ),
+                  TextButton(
+                    onPressed: _cancelDownload,
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.red),
+                    ),
                   ),
                 ],
               ),
