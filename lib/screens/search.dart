@@ -48,7 +48,7 @@ class _SearchState extends State<Search> {
 
     final url = 'https://youtube-music6.p.rapidapi.com/ytmusic/?query=$query';
     final headers = {
-      'X-RapidAPI-Key': '664a4529dcmshb4d445b999cfe83p1a7680jsna3e6433efbef',
+      'X-RapidAPI-Key': '0e5c7f9c21msh2abe22a023d60d8p1c80d7jsn0de3dc0d8b14',
       'X-RapidAPI-Host': 'youtube-music6.p.rapidapi.com'
     };
 
@@ -128,7 +128,7 @@ class _SearchState extends State<Search> {
     try {
       final url = 'https://youtube-mp3-downloader2.p.rapidapi.com/ytmp3/ytmp3/';
       final headers = {
-        'X-RapidAPI-Key': 'aa24b6fb09msha2e0d754d3bfb53p1d02ccjsneb10ebabd44e',
+        'X-RapidAPI-Key': '0e5c7f9c21msh2abe22a023d60d8p1c80d7jsn0de3dc0d8b14',
         'X-RapidAPI-Host': 'youtube-mp3-downloader2.p.rapidapi.com'
       };
       final params = {'url': videoUrl};
