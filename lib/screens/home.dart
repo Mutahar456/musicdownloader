@@ -1,9 +1,9 @@
+import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
-import 'package:musicdownloaders/models/category.dart';
-import 'package:musicdownloaders/models/music.dart';
-import 'package:musicdownloaders/services/music_operations.dart';
-import '../services/catergory_operations.dart';
+import 'package:musicdownloaders/screens/setting_page.dart'; // Import the SettingsPage
 
 class Home extends StatefulWidget {
   final Function _miniPlayer;
@@ -16,9 +16,8 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   final AudioPlayer _audioPlayer = AudioPlayer();
-
   bool _isPlaying = false;
-  Music? _currentMusic;
+  bool _isDarkTheme = true;
 
   @override
   void dispose() {
@@ -26,108 +25,125 @@ class _HomeState extends State<Home> {
     super.dispose();
   }
 
-  void _playPauseMusic(Music music) async {
-    if (music == null) {
-      print("Music not found");
-      return; // Exit the method if music is null
-    }
-
-    print("Audio Url: ${music.audioURL}");
+  Future<Map<String, List<Map<String, dynamic>>>> fetchDataFromAPI() async {
+    final url = Uri.parse('https://youtube-v2.p.rapidapi.com/trending/');
+    final headers = {
+      'X-RapidAPI-Key': '0e5c7f9c21msh2abe22a023d60d8p1c80d7jsn0de3dc0d8b14',
+      'X-RapidAPI-Host': 'youtube-v2.p.rapidapi.com',
+    };
 
     try {
-      if (_isPlaying && _currentMusic == music) {
-        await _audioPlayer.pause();
-        setState(() {
-          _isPlaying = false;
-        });
+      final response = await http.get(url, headers: headers);
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        final List<dynamic> videoList = responseData['videos'] ?? [];
+        final List<Map<String, dynamic>> shuffledList = videoList.cast<Map<String, dynamic>>();
+        shuffledList.shuffle(Random());
+
+        final int mid = (shuffledList.length / 2).floor();
+        final List<Map<String, dynamic>> madeForYouList = shuffledList.sublist(0, mid);
+        final List<Map<String, dynamic>> trendingSongsList = shuffledList.sublist(mid);
+
+        return {
+          'madeForYou': madeForYouList,
+          'trendingSongs': trendingSongsList,
+        };
       } else {
-        await _audioPlayer.play(UrlSource(music.audioURL)); // Play the audio
+        throw Exception('Failed to load data from API. Status code: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching data from API: $e');
+      return {
+        'madeForYou': [],
+        'trendingSongs': [],
+      };
+    }
+  }
+
+  Future<String?> fetchAudioURL(String? audioId) async {
+    if (audioId == null) return null;
+
+    final url = Uri.parse('https://youtube-v2.p.rapidapi.com/audio/videos');
+    final headers = {
+      'X-RapidAPI-Key': '0e5c7f9c21msh2abe22a023d60d8p1c80d7jsn0de3dc0d8b14',
+      'X-RapidAPI-Host': 'youtube-v2.p.rapidapi.com',
+    };
+    final params = {
+      'audio_id': audioId,
+    };
+
+    try {
+      final response = await http.get(url.replace(queryParameters: params), headers: headers);
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        final audioURL = responseData['audio_url'];
+        print('Fetched audio URL: $audioURL');
+        return audioURL as String?;
+      } else {
+        throw Exception('Failed to load audio URL from API. Status code: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching audio URL from API: $e');
+      return null;
+    }
+  }
+
+  void _playAudioFromURL(String? audioId) async {
+    if (audioId == null) return;
+
+    try {
+      final audioURL = await fetchAudioURL(audioId);
+      if (audioURL != null && audioURL.isNotEmpty) {
+        print('Playing audio from URL: $audioURL');
+        await _audioPlayer.play(UrlSource(audioURL));
         setState(() {
           _isPlaying = true;
-          _currentMusic = music;
         });
+      } else {
+        print("Failed to fetch audio URL");
       }
     } catch (e, stackTrace) {
       print("Error playing audio: $e");
       print(stackTrace);
     }
-
-    // Notify mini player widget about the current state
-    widget._miniPlayer(music, stop: !_isPlaying);
   }
 
-  // Widget to create a single category card
-  Widget createCategory(Category category) {
-    return Container(
-      color: Colors.blueGrey.shade400,
-      child: Row(
-        children: [
-          Image.network(category.imageURL, fit: BoxFit.cover),
-          Padding(
-            padding: EdgeInsets.only(left: 10),
-            child: Text(
-              category.name,
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Function to create a list of category widgets
-  List<Widget> createListOfCategories() {
-    List<Category> categoryList = CategoryOperations.getCategories();
-    return categoryList.map((category) => createCategory(category)).toList();
-  }
-
-  // Widget to create a single music card
-  Widget createMusic(Music music) {
+  Widget createMusicThumbnail(Map<String, dynamic> videoData) {
     return Padding(
-      padding: EdgeInsets.all(10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 200,
-            width: 200,
-            child: InkWell(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Image.network(
-                    music.image,
-                    fit: BoxFit.cover,
-                  ),
-                  IconButton(
-                    icon: _currentMusic == music && _isPlaying
-                        ? Icon(Icons.pause_circle_filled)
-                        : Icon(Icons.play_circle_filled),
-                    onPressed: () {
-                      _playPauseMusic(music);
-                    },
-                  ),
-                ],
-              ),
+      padding: const EdgeInsets.all(8.0),
+      child: GestureDetector(
+        onTap: () {
+          final audioId = videoData['audio_id'] as String?;
+          if (audioId != null) {
+            print('Thumbnail tapped, audio ID: $audioId');
+            _playAudioFromURL(audioId);
+          } else {
+            print('No audio ID found for this video');
+          }
+        },
+        child: Container(
+          height: 150,
+          width: 150,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            image: DecorationImage(
+              image: NetworkImage(videoData['thumbnails'][0]['url'] as String? ?? ''),
+              fit: BoxFit.cover,
             ),
           ),
-          Text(
-            music.name,
-            style: TextStyle(color: Colors.white),
+          child: Center(
+            child: Icon(
+              Icons.play_circle_filled,
+              size: 50,
+              color: Colors.white,
+            ),
           ),
-          Text(
-            music.desc,
-            style: TextStyle(color: Colors.white),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-
-  // Function to create a horizontal list of music cards
-  Widget createMusicList(String label) {
-    List<Music> musicList = MusicOperations.getMusic();
+  Widget createMusicList(String label, List<Map<String, dynamic>> apiData) {
     return Padding(
       padding: EdgeInsets.only(left: 10),
       child: Column(
@@ -136,18 +152,19 @@ class _HomeState extends State<Home> {
           Text(
             label,
             style: TextStyle(
-              color: Colors.white,
+              color: _isDarkTheme ? Colors.white : Colors.black,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
           Container(
-            height: 300,
+            height: 200,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              itemCount: musicList.length,
+              itemCount: apiData.length,
               itemBuilder: (ctx, index) {
-                return createMusic(musicList[index]);
+                final videoData = apiData[index];
+                return createMusicThumbnail(videoData);
               },
             ),
           ),
@@ -156,61 +173,228 @@ class _HomeState extends State<Home> {
     );
   }
 
-  // Widget to create a grid of categories
-  Widget createGrid() {
-    return Container(
-      padding: EdgeInsets.all(10),
-      height: 280,
-      child: GridView.count(
-        childAspectRatio: 5 / 2,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        crossAxisCount: 2,
-        children: createListOfCategories(),
+  String _getGreetingMessage() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      return 'Good Morning';
+    } else if (hour < 17) {
+      return 'Good Afternoon';
+    } else if (hour < 20) {
+      return 'Good Evening';
+    } else {
+      return 'Good Night';
+    }
+  }
+
+  // Fetch playlists data
+  Future<List<Map<String, dynamic>>> fetchPlaylists() async {
+    const url = 'https://soundcloud-scraper.p.rapidapi.com/v1/playlist/metadata';
+    const headers = {
+      'X-RapidAPI-Key': '0e5c7f9c21msh2abe22a023d60d8p1c80d7jsn0de3dc0d8b14',
+      'X-RapidAPI-Host': 'soundcloud-scraper.p.rapidapi.com',
+    };
+    final params = {
+      'playlist': 'https://soundcloud.com/edsheeran/sets/tour-edition-1',
+    };
+    try {
+      final response = await http.get(Uri.parse(url).replace(queryParameters: params), headers: headers);
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        final List<dynamic> playlistData = responseData['data'] ?? [];
+        final List<Map<String, dynamic>> playlists = playlistData.cast<Map<String, dynamic>>();
+        return playlists;
+      } else {
+        throw Exception('Failed to load playlist data from API. Status code: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error fetching playlist data from API: $e');
+      return [];
+    }
+  }
+
+  Widget createPlaylistList(List<Map<String, dynamic>> playlists) {
+    return Padding(
+      padding: EdgeInsets.only(left: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Playlists',
+            style: TextStyle(
+              color: _isDarkTheme ? Colors.white : Colors.black,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Container(
+            height: 200,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: playlists.length,
+              itemBuilder: (ctx, index) {
+                final playlistData = playlists[index];
+                return createPlaylistThumbnail(playlistData);
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  // Widget to create an AppBar with a given title
-  Widget createAppBar(String message) {
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0.0,
-      title: Text(message),
-      actions: [
-        Padding(
-          padding: EdgeInsets.only(right: 10),
-          child: Icon(Icons.settings),
+  Widget createPlaylistThumbnail(Map<String, dynamic> playlistData) {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: GestureDetector(
+        onTap: () {
+          // Handle playlist tap
+        },
+        child: Container(
+          height: 150,
+          width: 150,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            image: DecorationImage(
+              image: NetworkImage(playlistData['thumbnail'] as String? ?? ''),
+              fit: BoxFit.cover,
+            ),
+          ),
+          child: Center(
+            child: Text(
+              playlistData['title'] as String? ?? '',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
         ),
-      ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: SafeArea(
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.blueGrey.shade300, Colors.black],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              stops: [0.1, 0.3],
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: _isDarkTheme ? ThemeData.dark() : ThemeData.light(),
+      home: Scaffold(
+        backgroundColor: _isDarkTheme ? Colors.black : Colors.white,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0.0,
+          leading: IconButton(
+            icon: Icon(Icons.settings),
+            color: _isDarkTheme ? Colors.white : Colors.black,
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SettingsPage(onTextStyleChanged: (TextStyle) {}),
+                ),
+              );
+            },
+          ),
+          title: Text(
+            _getGreetingMessage(),
+            style: TextStyle(
+              color: _isDarkTheme ? Colors.white : Colors.black,
             ),
           ),
-          child: Column(
-            children: [
-              createAppBar('Music'),
-              SizedBox(height: 10),
-              createGrid(),
-              SizedBox(height: 10),
-              createMusicList('Made for you'),
-              createMusicList('Popular playlists'),
-            ],
+          actions: [
+            Switch(
+              value: _isDarkTheme,
+              onChanged: (value) {
+                setState(() {
+                  _isDarkTheme = value;
+                });
+              },
+              activeColor: Colors.white,
+              inactiveThumbColor: Colors.black,
+              inactiveTrackColor: Colors.grey,
+            ),
+          ],
+        ),
+        body: SingleChildScrollView(
+          child: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Wrap(
+                    spacing: 10.0,
+                    runSpacing: 10.0,
+                    children: [
+                      _createCategoryButton('Today\'s Top Hits'),
+                      _createCategoryButton('Dope Labs'),
+                      _createCategoryButton('Latina to Latina'),
+                      _createCategoryButton('Alan Gogoll'),
+                      _createCategoryButton('Chill Hits'),
+                      _createCategoryButton('Small Doses with Amanda Seales'),
+                    ],
+                  ),
+                ),
+                FutureBuilder(
+                  future: fetchDataFromAPI(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return Text('Error: ${snapshot.error}');
+                    } else {
+                      final apiData = snapshot.data as Map<String, List<Map<String, dynamic>>>;
+                      final madeForYouData = apiData['madeForYou']!;
+                      final trendingSongsData = apiData['trendingSongs']!;
+                      return Column(
+                        children: [
+                          createMusicList('Made For You', madeForYouData),
+                          createMusicList('Trending Songs', trendingSongsData),
+                        ],
+                      );
+                    }
+                  },
+                ),
+                FutureBuilder(
+                  future: fetchPlaylists(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return Center(child: CircularProgressIndicator());
+                    } else if (snapshot.hasError) {
+                      return Text('Error: ${snapshot.error}');
+                    } else {
+                      final playlists = snapshot.data as List<Map<String, dynamic>>;
+                      return createPlaylistList(playlists);
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+
+  Widget _createCategoryButton(String text) {
+    return Container(
+      padding: EdgeInsets.all(8.0),
+      decoration: BoxDecoration(
+        color: _isDarkTheme ? Colors.grey.shade800 : Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(5.0),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: _isDarkTheme ? Colors.white : Colors.black,
+        ),
+      ),
+    );
+  }
 }
+
+void main() {
+  runApp(Home((music, {stop = false}) {}));
+}
+
