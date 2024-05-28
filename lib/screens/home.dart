@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:musicdownloaders/screens/Video_Player_Screen.dart';
 import 'package:musicdownloaders/screens/setting_page.dart'; // Import the SettingsPage
 
 class Home extends StatefulWidget {
@@ -88,22 +89,22 @@ class _HomeState extends State<Home> {
     }
   }
 
-  void _playAudioFromURL(String? audioId) async {
-    if (audioId == null) return;
+  void _playVideoFromURL(String? videoId) async {
+    if (videoId == null) return;
 
     try {
-      final audioURL = await fetchAudioURL(audioId);
-      if (audioURL != null && audioURL.isNotEmpty) {
-        print('Playing audio from URL: $audioURL');
-        await _audioPlayer.play(UrlSource(audioURL));
-        setState(() {
-          _isPlaying = true;
-        });
+      if (videoId != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => VideoPlayerPage(videoId: videoId),
+          ),
+        );
       } else {
-        print("Failed to fetch audio URL");
+        print("Failed to fetch video URL");
       }
     } catch (e, stackTrace) {
-      print("Error playing audio: $e");
+      print("Error playing video: $e");
       print(stackTrace);
     }
   }
@@ -113,12 +114,12 @@ class _HomeState extends State<Home> {
       padding: const EdgeInsets.all(8.0),
       child: GestureDetector(
         onTap: () {
-          final audioId = videoData['audio_id'] as String?;
-          if (audioId != null) {
-            print('Thumbnail tapped, audio ID: $audioId');
-            _playAudioFromURL(audioId);
+          final videoId = videoData['video_id'] as String?;
+          if (videoId != null) {
+            print('Thumbnail tapped, video ID: $videoId');
+            _playVideoFromURL(videoId);
           } else {
-            print('No audio ID found for this video');
+            print('No video ID found for this video');
           }
         },
         child: Container(
@@ -142,6 +143,7 @@ class _HomeState extends State<Home> {
       ),
     );
   }
+
 
   Widget createMusicList(String label, List<Map<String, dynamic>> apiData) {
     return Padding(
